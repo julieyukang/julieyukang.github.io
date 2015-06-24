@@ -1,0 +1,32 @@
+@import url(http://fonts.googleapis.com/css?family=Anton);
+@import url(http://fonts.googleapis.com/css?family=PT+Sans+Narrow);
+body {
+    color: #2B5678;
+    background-color: #A8DDFF;
+}
+
+h1 {
+    font-family: 'Anton', sans-serif;
+    font-size: 30px;
+    font-weight: 300;
+    color: #2F4294;
+    text-align: center;
+}
+
+div {margin-left: 150px;}
+
+#slogan {
+    text-align: center;
+}
+p{    font-family: 'PT Sans Narrow', sans-serif; text-align: center}
+
+ul {
+    list-style-type: none;
+    text-align: center;
+    font-family: 'PT Sans Narrow', sans-serif;
+}
+
+
+h3 {
+    font-family: 'Anton', sans-serif; margin-left: 200px;
+}
