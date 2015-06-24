@@ -1,0 +1,21 @@
+body {
+    color: #2B5678;
+    background-color: #A8DDFF;
+}
+
+h1 {
+    font-size: 30px;
+    font-weight: 300;
+    color: #2F4294;
+    text-align: center;
+}
+p { text-align: center}
+
+ul {
+    list-style-type: none; text-align: center;
+}
+
+#slogan {
+    text-align: center;
+}
+div { margin-left: 280px}
