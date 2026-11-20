@@ -2,6 +2,8 @@
 
 A pixel-art 3D office that shows every project you're running and the agents working on them.
 
+![Pixel Office preview](preview.png)
+
 - **Each project is a pod**: a colored rug with a desk. Each agent sits at a seat in that pod.
 - **The monitor and the light on top of it show the agent's status**:
   - 🟩 **working**: typing, screen flickers
