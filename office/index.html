@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Final Battle</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@500;700;800&family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
   {
@@ -18,6 +19,7 @@
 </head>
 <body>
   <canvas id="scene"></canvas>
+  <div id="vignette"></div>
   <div id="labels"></div>
   <div id="tooltip" hidden></div>
 
@@ -29,7 +31,7 @@
   <aside id="inbox" class="panel">
     <div class="panel-head">
       <h2>Needs you <span id="inbox-count" class="badge">0</span></h2>
-      <button id="inbox-toggle" class="icon-btn" aria-label="Collapse inbox">–</button>
+      <button id="inbox-toggle" class="icon-btn" aria-label="Collapse">–</button>
     </div>
     <ul id="inbox-list"></ul>
   </aside>
@@ -45,12 +47,10 @@
   <footer id="controls">
     <div class="legend" id="legend"></div>
     <div class="buttons">
-      <button id="btn-notify" class="pix-btn">🔔 Alerts</button>
-      <button id="btn-sound" class="pix-btn">🔊 Sound</button>
-      <button id="btn-demo" class="pix-btn">▶ Demo</button>
-      <button id="btn-reset" class="pix-btn">⟲ View</button>
-      <button id="btn-theme" class="pix-btn">🏢 Office</button>
-      <button id="btn-style" class="pix-btn">👾 Pixel look</button>
+      <button id="btn-notify" class="btn">Alerts</button>
+      <button id="btn-sound" class="btn">Sound</button>
+      <button id="btn-demo" class="btn">Demo</button>
+      <button id="btn-reset" class="btn">Reset view</button>
     </div>
   </footer>
 
