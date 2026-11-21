@@ -1,10 +1,18 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 /* ------------------------------------------------------------------ *
  *  Config
  * ------------------------------------------------------------------ */
-const PIX = 3;                 // screen pixels per render pixel (bigger = chunkier)
+const params = new URLSearchParams(location.search);
+
+// Two looks: 'cozy' (smooth, rounded, light theme, default) and 'pixel' (chunky retro)
+const STYLE = (params.get('style') || (() => { try { return localStorage.getItem('office.style'); } catch { return null; } })() || 'cozy').replace(/"/g, '');
+const COZY = STYLE !== 'pixel';
+document.body.classList.add(COZY ? 'cozy' : 'pixel');
+
+const PIX = COZY ? 1 : 3;      // screen pixels per render pixel (bigger = chunkier)
 const POLL_MS = 30000;         // how often data is re-fetched
 const SEATS_PER_ROW = 4;
 const SEAT_W = 1.7;
@@ -20,7 +28,6 @@ const STATUS = {
 };
 const ALERT_STATUSES = new Set(['needs_you', 'error']);
 
-const params = new URLSearchParams(location.search);
 const DATA_URL = params.get('data') || 'data.json';
 
 /* ------------------------------------------------------------------ *
@@ -37,14 +44,15 @@ let soundOn = store.get('sound', true);
  *  Renderer / scene / camera
  * ------------------------------------------------------------------ */
 const canvas = document.getElementById('scene');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
-renderer.setPixelRatio(1);
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: COZY });
+renderer.setPixelRatio(COZY ? Math.min(window.devicePixelRatio || 1, 2) : 1);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.BasicShadowMap;   // hard, pixelly shadows
+renderer.shadowMap.type = COZY ? THREE.PCFSoftShadowMap : THREE.BasicShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#1b1a2e');
+const BG = COZY ? '#f7efe2' : '#1b1a2e';
+scene.background = new THREE.Color(BG);
 
 const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 200);
 const CAM_DIR = new THREE.Vector3(1, 1.05, 1).normalize();
@@ -79,15 +87,29 @@ window.addEventListener('resize', resize);
  *  Voxel helpers
  * ------------------------------------------------------------------ */
 const matCache = new Map();
+let toonRamp = null;
+function toonGradient() {
+  if (toonRamp) return toonRamp;
+  const data = new Uint8Array([150, 210, 255]);
+  toonRamp = new THREE.DataTexture(data, 3, 1, THREE.RedFormat);
+  toonRamp.minFilter = toonRamp.magFilter = THREE.NearestFilter;
+  toonRamp.needsUpdate = true;
+  return toonRamp;
+}
 function mat(color) {
   const key = String(color);
-  if (!matCache.has(key)) matCache.set(key, new THREE.MeshLambertMaterial({ color }));
+  if (!matCache.has(key)) matCache.set(key, COZY
+    ? new THREE.MeshToonMaterial({ color, gradientMap: toonGradient() })
+    : new THREE.MeshLambertMaterial({ color }));
   return matCache.get(key);
 }
 const geoCache = new Map();
 function boxGeo(w, h, d) {
   const key = `${w}|${h}|${d}`;
-  if (!geoCache.has(key)) geoCache.set(key, new THREE.BoxGeometry(w, h, d));
+  if (!geoCache.has(key)) {
+    const r = Math.min(Math.min(w, h, d) * 0.3, 0.09);
+    geoCache.set(key, COZY && r > 0.008 ? new RoundedBoxGeometry(w, h, d, 2, r) : new THREE.BoxGeometry(w, h, d));
+  }
   return geoCache.get(key);
 }
 function box(parent, w, h, d, color, x = 0, y = 0, z = 0, opts = {}) {
@@ -215,8 +237,8 @@ function buildWorld(d) {
   const x0 = -W / 2, z0 = -D / 2;
 
   // Floor
-  const floorTex = checkerTexture('#cfc3a8', '#c2b597');
-  floorTex.repeat.set(W / 1, D / 1);
+  const floorTex = COZY ? checkerTexture('#ecdcc0', '#e4d1b1') : checkerTexture('#cfc3a8', '#c2b597');
+  floorTex.repeat.set(COZY ? W / 2 : W, COZY ? D / 2 : D);
   const floor = new THREE.Mesh(new THREE.BoxGeometry(W, 0.3, D), [
     mat('#8a7a63'), mat('#8a7a63'),
     new THREE.MeshLambertMaterial({ map: floorTex }),
@@ -243,7 +265,7 @@ function buildWorld(d) {
     box(world, 0.08, 1.3, 0.12, '#7d6fa8', x, 2.0, z0 + 0.06);
     if (!night) box(world, 0.5, 0.18, 0.12, '#ffffff', x - 0.4, 2.35, z0 + 0.07, { cast: false });
   }
-  scene.background = new THREE.Color(night ? '#141327' : '#1b1a2e');
+  scene.background = new THREE.Color(COZY ? BG : (night ? '#141327' : '#1b1a2e'));
   hemi.intensity = night ? 1.1 : 1.6;
 
   // Wall clock + sign
@@ -302,8 +324,8 @@ function buildWorld(d) {
   sc.left = -span; sc.right = span; sc.top = span; sc.bottom = -span; sc.near = 0.5; sc.far = span * 4;
   sc.updateProjectionMatrix();
 
-  viewSize = span * 0.72;
-  world.userData.home = { target: new THREE.Vector3(0, 0, 0.5), dist: span * 2 };
+  viewSize = span * (COZY ? 0.7 : 0.72);
+  world.userData.home = { target: new THREE.Vector3(-0.8, 0, -0.8), dist: span * 2 };
   resetView();
   resize();
 }
@@ -353,7 +375,7 @@ function buildPod(project, cx, czTop, L) {
   label.className = 'floor-label';
   label.addEventListener('click', () => focusOn(new THREE.Vector3(cx, 0, czTop + L.cellD / 2), null));
   document.getElementById('labels').appendChild(label);
-  pods.push({ project, label, anchor: new THREE.Vector3(cx, 0.1, czTop + L.cellD - 0.85) });
+  pods.push({ project, label, anchor: new THREE.Vector3(cx + rugW / 2 - 0.9, 0.1, czTop + rugD - 0.75) });
 }
 
 function buildSeat(project, a, sx, deskZ, parent) {
@@ -394,6 +416,10 @@ function buildSeat(project, a, sx, deskZ, parent) {
     pos: seat.clone(), facing: Math.PI,
   };
   body.traverse(o => { o.userData.agentId = a.id; });
+  const tag = document.createElement('div');
+  tag.addEventListener('click', () => { openCard(a.id); focusOn(seat, 1.7); });
+  document.getElementById('labels').appendChild(tag);
+  ag.tag = tag;
   agents.set(a.id, ag);
 }
 
@@ -455,13 +481,24 @@ function applyData(d) {
       if (!ag) continue;
       ag.data = a; ag.project = p;
       setAgentStatus(ag, effectiveStatus(a));
+      updateTag(ag);
     }
   }
-  document.getElementById('title').textContent = `${(d.owner && d.owner.name) || 'My'}'s Pixel Office`;
+  document.getElementById('title').textContent = `${(d.owner && d.owner.name) || 'My'}'s ${COZY ? 'Agent' : 'Pixel'} Office`;
   document.title = 'Pixel Office';
   renderHud();
   notifyNew();
   if (openCardId) openCard(openCardId);
+}
+
+function updateTag(ag) {
+  const s = ag.status, a = ag.data;
+  const alert = ALERT_STATUSES.has(s);
+  ag.tag.className = `agent-tag s-${s}${alert ? ' ask' : ''}`;
+  ag.tag.innerHTML = alert
+    ? `<div class="ask-who">${esc(a.name)} ${s === 'error' ? 'is stuck' : 'needs you'}</div>
+       <div class="ask-what">${esc((a.action && a.action.title) || a.task || 'Take a look')}</div>`
+    : `<i class="dot" style="background:${STATUS[s].css}"></i><b>${esc(a.name)}</b><span class="tag-status">${STATUS[s].label}</span>`;
 }
 
 function setAgentStatus(ag, s) {
@@ -594,12 +631,44 @@ function animateAgent(ag, dt) {
 }
 
 const tmp = new THREE.Vector3();
+const tagPos = new THREE.Vector3();
 function placeLabel(v, el) {
   tmp.copy(v).project(camera);
   const vis = tmp.z > -1 && tmp.z < 1;
   el.style.display = vis ? '' : 'none';
   el.style.left = ((tmp.x + 1) / 2 * window.innerWidth).toFixed(0) + 'px';
   el.style.top = ((1 - tmp.y) / 2 * window.innerHeight).toFixed(0) + 'px';
+}
+
+// Name tags follow their agent; speech bubbles stack upward instead of overlapping.
+function placeAgentTags() {
+  const showNames = camera.zoom >= (COZY ? 0.85 : 1.3);
+  const bubbles = [];
+  agents.forEach(ag => {
+    if (!ag.tag) return;
+    const alert = ALERT_STATUSES.has(ag.status);
+    if (!alert && !showNames) { ag.tag.style.display = 'none'; return; }
+    tagPos.set(ag.body.position.x, alert ? 2.5 : 1.75, ag.body.position.z);
+    if (!alert) { placeLabel(tagPos, ag.tag); return; }
+    tmp.copy(tagPos).project(camera);
+    bubbles.push({ ag, x: (tmp.x + 1) / 2 * window.innerWidth, y: (1 - tmp.y) / 2 * window.innerHeight, vis: tmp.z > -1 && tmp.z < 1 });
+  });
+  bubbles.sort((a, b) => b.y - a.y);   // lowest on screen keeps its spot
+  const placed = [];
+  for (const b of bubbles) {
+    const w = b.ag.tag.offsetWidth || 180, h = b.ag.tag.offsetHeight || 50;
+    let y = b.y;
+    for (let guard = 0; guard < 12; guard++) {
+      const hit = placed.find(p => Math.abs(b.x - p.x) < (w + p.w) / 2 + 6 && y > p.y - p.h - 8 && y - h < p.y + 8);
+      if (!hit) break;
+      y = hit.y - hit.h - 10;
+    }
+    placed.push({ x: b.x, y, w, h });
+    const el = b.ag.tag;
+    el.style.display = b.vis ? '' : 'none';
+    el.style.left = b.x.toFixed(0) + 'px';
+    el.style.top = y.toFixed(0) + 'px';
+  }
 }
 
 let camGoal = null;
@@ -633,6 +702,7 @@ function loop() {
 
   for (const p of pods) placeLabel(p.anchor, p.label);
   if (owner) placeLabel(owner.anchor, owner.label);
+  placeAgentTags();
 
   renderer.render(scene, camera);
 }
@@ -691,7 +761,7 @@ function renderHud() {
   for (const pd of pods) {
     const n = (pd.project.agents || []).filter(a => ALERT_STATUSES.has(effectiveStatus(a))).length;
     pd.label.innerHTML = `${esc(pd.project.name)}${n ? `<span class="alert">!${n}</span>` : ''}`;
-    pd.label.style.borderColor = '#0e0d1a';
+    if (!COZY) pd.label.style.borderColor = '#0e0d1a';
     pd.label.style.background = pd.project.color || '';
     pd.label.style.color = '#1b1a2e';
   }
@@ -731,7 +801,7 @@ function openCard(id) {
   const btn = document.getElementById('btn-handled');
   if (btn) btn.addEventListener('click', () => {
     handled[handledKey(a)] = true; store.set('handled', handled);
-    const ag = agents.get(a.id); if (ag) setAgentStatus(ag, effectiveStatus(a));
+    const ag = agents.get(a.id); if (ag) { setAgentStatus(ag, effectiveStatus(a)); updateTag(ag); }
     renderHud(); openCard(a.id);
   });
   card.hidden = false;
@@ -879,6 +949,13 @@ notifyBtn.addEventListener('click', async () => {
   await Notification.requestPermission(); syncNotify();
 });
 syncNotify();
+
+const styleBtn = document.getElementById('btn-style');
+styleBtn.textContent = COZY ? '👾 Pixel look' : '🧸 Cozy look';
+styleBtn.addEventListener('click', () => {
+  store.set('style', COZY ? 'pixel' : 'cozy');
+  const u = new URL(location.href); u.searchParams.delete('style'); location.href = u.toString();
+});
 
 const legend = document.getElementById('legend');
 legend.innerHTML = Object.values(STATUS).map(s => `<span><i class="dot" style="background:${s.css}"></i>${s.label}</span>`).join('');

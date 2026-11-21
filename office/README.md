@@ -1,6 +1,6 @@
-# Pixel Office
+# Agent Office
 
-A pixel-art 3D office that shows every project you're running and the agents working on them.
+A cozy 3D office that shows every project you're running and the agents working on them.
 
 ![Pixel Office preview](preview.png)
 
@@ -14,6 +14,8 @@ A pixel-art 3D office that shows every project you're running and the agents wor
 - **Your desk** sits at the front. Its lamp blinks red while anything needs you.
 - **The "Needs you" inbox** (top right) lists every `needs_you` and `error` agent. Click an item to fly to that agent and read what it's asking for. **Mark handled** clears the alert in this browser until the agent posts a new update.
 - **Alerts**: a chime plays when something new needs you (after you've clicked the page once). Click 🔔 to also get desktop notifications while the tab is in the background. The tab title shows the count, e.g. `(3) Pixel Office`.
+- **Name tags** float over every agent. Anyone who needs you gets a **speech bubble** saying what they need.
+- **Two looks**: the default cozy cartoon style, or a chunky retro pixel style (the 👾 / 🧸 button, or `?style=pixel`).
 - Drag to rotate, right-drag or two-finger drag to pan, scroll to zoom. **▶ Demo** shuffles statuses so you can see it move.
 
 ## Feeding it your real projects
