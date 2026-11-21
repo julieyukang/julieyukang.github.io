@@ -1,6 +1,20 @@
-# Agent Office
+# Final Battle (Agent Office)
 
-A cozy 3D office that shows every project you're running and the agents working on them.
+A 3D world that shows every project you're running and the agents working on them. There are two worlds; switch with the ⚔️ / 🏢 button or `?theme=battle` / `?theme=office`.
+
+## ⚔️ Battle world (default)
+
+- **Each project is a battle zone** with its own terrain (Lava Fields, Frost Peaks, Ancient Ruins, Wild Forest, Dune Sea) and a **giant boss**. The boss's health bar is the project's remaining work: it drops as your agents' `progress` goes up, and the boss falls over when every agent in the zone is `done`.
+- **Agents are heroes** with capes and swords, hammers or magic staffs:
+  - **Fighting** (`working`): attacking the boss, firing magic bolts
+  - **Resting** (`idle`): heads to the campfire now and then
+  - **Needs backup** (`needs_you`): fires a red signal beam into the sky and shows a speech bubble with what they need
+  - **Down** (`error`): knocked flat with dizzy stars
+  - **Victory** (`done`): arms up, celebrating
+- **You're the commander** at the command tent at the front. Its beacon flashes red while anyone needs you.
+
+## 🏢 Office world
+
 
 ![Pixel Office preview](preview.png)
 

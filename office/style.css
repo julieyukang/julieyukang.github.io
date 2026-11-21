@@ -342,3 +342,17 @@ body.cozy #tooltip { font-family: var(--body); font-size: 14px; font-weight: 700
   body.cozy #hud h1 { font-size: 20px; }
   body.cozy .stat { font-size: 12px; padding: 4px 9px; }
 }
+
+/* ------------------------------------------------------------------ *
+ *  Battle world
+ * ------------------------------------------------------------------ */
+body.battle { --bg: #3a2a5e; }
+body.battle #hud h1 { color: #fff; text-shadow: 0 2px 10px rgba(20, 10, 40, .6); }
+body.battle .legend { color: #fff; text-shadow: 0 1px 6px rgba(20, 10, 40, .8); }
+.floor-label.zone { display: flex; flex-direction: column; gap: 3px; min-width: 150px; text-align: left; }
+.floor-label.zone .zone-name { display: flex; align-items: center; }
+.floor-label.zone .zone-sub { font-family: var(--body); font-size: 12px; font-weight: 700; opacity: .75; }
+.floor-label.zone .hp { height: 8px; background: rgba(0, 0, 0, .25); border-radius: 999px; overflow: hidden; }
+.floor-label.zone .hp > span { display: block; height: 100%; background: linear-gradient(90deg, #ff4d4d, #ff9a3c); border-radius: 999px; transition: width .6s; }
+body.pixel .floor-label.zone .hp { border-radius: 0; }
+body.pixel .floor-label.zone .hp > span { border-radius: 0; background: #ff4d4d; }

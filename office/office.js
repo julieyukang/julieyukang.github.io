@@ -12,6 +12,12 @@ const STYLE = (params.get('style') || (() => { try { return localStorage.getItem
 const COZY = STYLE !== 'pixel';
 document.body.classList.add(COZY ? 'cozy' : 'pixel');
 
+// Two worlds: 'battle' (default: each project is a battle zone) and 'office'
+const THEME = (params.get('theme') || (() => { try { return localStorage.getItem('office.theme'); } catch { return null; } })() || 'battle').replace(/"/g, '');
+const BATTLE = THEME !== 'office';
+document.body.classList.add(BATTLE ? 'battle' : 'office-world');
+const APP_NAME = BATTLE ? 'Final Battle' : 'Agent Office';
+
 const PIX = COZY ? 1 : 3;      // screen pixels per render pixel (bigger = chunkier)
 const POLL_MS = 30000;         // how often data is re-fetched
 const SEATS_PER_ROW = 4;
@@ -27,6 +33,13 @@ const STATUS = {
   done:      { label: 'Done',      css: '#4da3ff' },
 };
 const ALERT_STATUSES = new Set(['needs_you', 'error']);
+if (BATTLE) {
+  STATUS.working.label = 'Fighting';
+  STATUS.idle.label = 'Resting';
+  STATUS.needs_you.label = 'Needs backup';
+  STATUS.error.label = 'Down';
+  STATUS.done.label = 'Victory';
+}
 
 const DATA_URL = params.get('data') || 'data.json';
 
@@ -460,6 +473,541 @@ function buildOwner(o, x, z) {
   owner = { name: o.name || 'You', body, screenMat, lamp, lampMat, label, anchor: new THREE.Vector3(x, 0.1, z + 1.9) };
 }
 
+/* ================================================================== *
+ *  BATTLE WORLD: each project is a battle zone with its own boss,
+ *  agents are heroes fighting it.
+ * ================================================================== */
+const TERRAINS = [
+  { name: 'Lava Fields',   ground: '#5a4646', edge: '#3a2c2c', boss: '#8a3424', bossEye: '#ffd23a', decor: 'lava' },
+  { name: 'Frost Peaks',   ground: '#dcefff', edge: '#94b9cf', boss: '#4f7fae', bossEye: '#c4f6ff', decor: 'ice' },
+  { name: 'Ancient Ruins', ground: '#c2b6a0', edge: '#857a66', boss: '#665f78', bossEye: '#c49bff', decor: 'ruins' },
+  { name: 'Wild Forest',   ground: '#86b86e', edge: '#557f43', boss: '#3d5a2c', bossEye: '#eaff5a', decor: 'forest' },
+  { name: 'Dune Sea',      ground: '#eccf92', edge: '#bc975c', boss: '#9c5f34', bossEye: '#ff6b3a', decor: 'desert' },
+];
+let projectiles = [];
+let smoke = [];
+let campSpot = new THREE.Vector3();
+let fireFlames = [];
+
+function seeded(seed) {
+  let s = seed >>> 0 || 1;
+  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+}
+function skyTexture(top, bottom) {
+  const c = document.createElement('canvas'); c.width = 2; c.height = 256;
+  const g = c.getContext('2d');
+  const grd = g.createLinearGradient(0, 0, 0, 256);
+  grd.addColorStop(0, top); grd.addColorStop(0.65, '#b0607a'); grd.addColorStop(1, bottom);
+  g.fillStyle = grd; g.fillRect(0, 0, 2, 256);
+  const tx = new THREE.CanvasTexture(c);
+  tx.colorSpace = THREE.SRGBColorSpace;
+  return tx;
+}
+const glow = new Map();
+function glowMat(color, opacity) {
+  const k = color + (opacity || '');
+  if (!glow.has(k)) glow.set(k, new THREE.MeshBasicMaterial(opacity ? { color, transparent: true, opacity, depthWrite: false } : { color }));
+  return glow.get(k);
+}
+
+function battleLayout(projects) {
+  const maxSeats = Math.max(2, ...projects.map(p => Math.min(SEATS_PER_ROW, (p.agents || []).length)));
+  const maxRows = Math.max(1, ...projects.map(p => Math.ceil(((p.agents || []).length || 1) / SEATS_PER_ROW)));
+  const cellW = Math.max(maxSeats * 1.5 + 2.6, 6);
+  const cellD = 4.6 + maxRows * 1.7;
+  const gap = 1.4;
+  const cols = Math.max(1, Math.ceil(Math.sqrt(projects.length)));
+  const rows = Math.max(1, Math.ceil(projects.length / cols));
+  const front = 5.5;
+  const W = cols * (cellW + gap) + gap;
+  const D = rows * (cellD + gap) + gap + front;
+  return { cellW, cellD, gap, cols, rows, W, D };
+}
+
+function buildBattle(d) {
+  if (world) scene.remove(world);
+  world = new THREE.Group();
+  scene.add(world);
+  agents.clear();
+  pods = []; projectiles = []; smoke = []; fireFlames = [];
+  document.getElementById('labels').innerHTML = '';
+
+  const projects = d.projects || [];
+  const L = battleLayout(projects);
+  const { W, D } = L;
+  const x0 = -W / 2, z0 = -D / 2;
+  const rand = seeded(1234);
+
+  scene.background = skyTexture('#3a2a5e', '#ffb27a');
+  hemi.color.set('#ffe6cc'); hemi.groundColor.set('#7a5a80'); hemi.intensity = 1.9;
+  sun.color.set('#ffc49a'); sun.intensity = 2.3;
+  sun.shadow.mapSize.set(2048, 2048);
+
+  // Battlefield ground with a margin of rubble around it
+  const groundTex = checkerTexture('#8f7a64', '#86715b');
+  groundTex.repeat.set((W + 6) / 2, (D + 6) / 2);
+  const ground = new THREE.Mesh(new THREE.BoxGeometry(W + 6, 0.6, D + 6), [
+    mat('#5e4b3a'), mat('#5e4b3a'), new THREE.MeshLambertMaterial({ map: groundTex }),
+    mat('#5e4b3a'), mat('#5e4b3a'), mat('#5e4b3a'),
+  ]);
+  ground.position.y = -0.3;
+  ground.receiveShadow = true;
+  world.add(ground);
+
+  // Ruined city skyline along the back and left edges
+  const greys = ['#6e6680', '#625a74', '#7c7390', '#575069'];
+  const ruin = (x, z, along) => {
+    const h = 1.2 + rand() * 3.8, w = 1.0 + rand() * 0.8;
+    const c = greys[Math.floor(rand() * greys.length)];
+    const b = new THREE.Group(); b.position.set(x, 0, z); world.add(b);
+    const [bw, bd] = along === 'x' ? [w, 1.2] : [1.2, w];
+    box(b, bw, h, bd, c, 0, h / 2, 0);
+    box(b, bw * 0.55, 0.7 + rand(), bd * 0.6, c, (rand() - 0.5) * 0.3, h + 0.35, 0);   // broken top
+    for (let wy = 0.8; wy < h - 0.4; wy += 0.9) {
+      const lit = rand() < 0.25;
+      const wm = lit ? glowMat('#ffcf6a') : null;
+      if (along === 'x') box(b, 0.22, 0.3, 0.04, '#3a344a', (rand() - 0.5) * (bw - 0.4), wy, bd / 2 + 0.01, { material: wm || undefined, cast: false });
+      else box(b, 0.04, 0.3, 0.22, '#3a344a', bw / 2 + 0.01, wy, (rand() - 0.5) * (bd - 0.4), { material: wm || undefined, cast: false });
+    }
+  };
+  for (let x = x0 - 2; x < W / 2 + 3; x += 1.5 + rand() * 0.6) ruin(x, z0 - 2.4, 'x');
+  for (let z = z0 - 0.5; z < D / 2 + 2; z += 1.5 + rand() * 0.6) ruin(x0 - 2.4, z, 'z');
+
+  // Smoke columns rising from the ruins
+  for (let i = 0; i < 4; i++) {
+    const sx = x0 + rand() * W, sz = z0 - 2.4;
+    for (let k = 0; k < 6; k++) {
+      const m = box(world, 0.6, 0.6, 0.6, null, sx, 0, sz, { material: glowMat('#4a4258', 0.55), cast: false });
+      smoke.push({ m, base: new THREE.Vector3(sx, 3 + rand() * 2, sz), t: k / 6 });
+    }
+  }
+
+  // Scattered rocks and craters
+  for (let i = 0; i < 26; i++) {
+    const x = x0 + rand() * W, z = z0 + rand() * D;
+    if (rand() < 0.5) box(world, 0.3 + rand() * 0.4, 0.2 + rand() * 0.3, 0.3 + rand() * 0.4, '#6d5d4e', x, 0.1, z);
+    else box(world, 0.9 + rand() * 0.6, 0.03, 0.9 + rand() * 0.6, '#5f4e3e', x, 0.015, z, { cast: false });
+  }
+
+  // Battle zones
+  projects.forEach((p, i) => {
+    const col = i % L.cols, row = Math.floor(i / L.cols);
+    const cx = x0 + L.gap + col * (L.cellW + L.gap) + L.cellW / 2;
+    const czTop = z0 + L.gap + row * (L.cellD + L.gap);
+    buildZone(p, i, cx, czTop, L);
+  });
+
+  // Camp (where resting heroes go) and your command post
+  const frontZ = D / 2 - 2.6;
+  buildCamp(x0 + 3, frontZ);
+  buildCommand(d.owner || {}, Math.min(2, W / 2 - 3), frontZ + 0.3);
+
+  const span = Math.max(W, D);
+  sun.position.set(-span * 0.5, span * 1.1, span * 0.4);
+  sun.target.position.set(0, 0, 0);
+  const sc = sun.shadow.camera;
+  sc.left = -span; sc.right = span; sc.top = span; sc.bottom = -span; sc.near = 0.5; sc.far = span * 4;
+  sc.updateProjectionMatrix();
+
+  viewSize = span * 0.92;
+  world.userData.home = { target: new THREE.Vector3(-1.2, 0, -1.6), dist: span * 2 };
+  resetView();
+  resize();
+}
+
+function banner(parent, x, z, color) {
+  box(parent, 0.08, 1.8, 0.08, '#5a4636', x, 0.9 + 0.3, z);
+  box(parent, 0.5, 0.35, 0.04, color, x + 0.27, 1.85 + 0.3, z, { cast: false });
+}
+
+function zoneDecor(g, T, cx, czTop, zw, zd, rand) {
+  const spots = [
+    [cx - zw / 2 + 0.6, czTop + 0.6], [cx + zw / 2 - 0.6, czTop + 0.6],
+    [cx - zw / 2 + 0.55, czTop + 2.3], [cx + zw / 2 - 0.55, czTop + 2.3],
+  ];
+  const y = 0.3;
+  for (const [x, z] of spots) {
+    if (T.decor === 'lava') {
+      box(g, 0.5, 0.4, 0.5, '#3a2c2c', x, y + 0.2, z);
+      box(g, 0.9 + rand() * 0.6, 0.02, 0.1, null, x + (rand() - 0.5), y + 0.01, z + 0.5, { material: glowMat('#ff7a1a'), cast: false })
+        .rotation.y = rand() * Math.PI;
+    } else if (T.decor === 'ice') {
+      for (let k = 0; k < 3; k++) {
+        const h = 0.5 + rand() * 0.9;
+        const s = box(g, 0.22, h, 0.22, '#a8e4ff', x + (rand() - 0.5) * 0.5, y + h / 2, z + (rand() - 0.5) * 0.5);
+        s.rotation.z = (rand() - 0.5) * 0.5;
+      }
+    } else if (T.decor === 'ruins') {
+      const h = 0.5 + rand() * 1.3;
+      box(g, 0.45, h, 0.45, '#ddd4c2', x, y + h / 2, z);
+      box(g, 0.6, 0.15, 0.6, '#cfc5b0', x, y + h + 0.07, z);
+    } else if (T.decor === 'forest') {
+      box(g, 0.2, 0.6, 0.2, '#7a5236', x, y + 0.3, z);
+      box(g, 0.9, 0.8, 0.9, '#3f8f45', x, y + 1.0, z);
+      box(g, 0.55, 0.5, 0.55, '#58b05d', x + 0.05, y + 1.55, z);
+    } else {
+      box(g, 0.26, 1.0, 0.26, '#4f9a4a', x, y + 0.5, z);
+      box(g, 0.38, 0.16, 0.16, '#4f9a4a', x + 0.18, y + 0.55, z);
+      box(g, 0.16, 0.36, 0.16, '#4f9a4a', x + 0.3, y + 0.75, z);
+    }
+  }
+  // a few ground details
+  for (let k = 0; k < 3; k++) {
+    const x = cx + (rand() - 0.5) * (zw - 1), z = czTop + 3.2 + rand() * (zd - 3.8);
+    if (T.decor === 'lava') box(g, 0.8, 0.02, 0.08, null, x, y + 0.01, z, { material: glowMat('#ff8a2a'), cast: false }).rotation.y = rand() * 3;
+    else if (T.decor === 'ice') box(g, 0.7, 0.08, 0.5, '#ffffff', x, y + 0.04, z, { cast: false });
+    else box(g, 0.25, 0.15, 0.25, shade(T.ground, -0.15), x, y + 0.07, z);
+  }
+}
+
+function makeBoss(T, seed) {
+  const g = new THREE.Group();
+  const c = T.boss, dark = shade(c, -0.1), light = shade(c, 0.12);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: T.bossEye });
+  box(g, 0.5, 0.8, 0.55, dark, -0.42, 0.4, 0);
+  box(g, 0.5, 0.8, 0.55, dark, 0.42, 0.4, 0);
+  const torso = new THREE.Group(); torso.position.y = 0.8; g.add(torso);
+  box(torso, 1.6, 1.25, 1.05, c, 0, 0.62, 0);
+  box(torso, 0.9, 0.6, 0.06, light, 0, 0.6, 0.54);
+  box(torso, 0.3, 0.3, 0.07, null, 0, 0.62, 0.57, { material: eyeMat, cast: false });   // glowing core
+  const armL = new THREE.Group(); armL.position.set(-1.0, 1.1, 0); torso.add(armL);
+  const armR = new THREE.Group(); armR.position.set(1.0, 1.1, 0); torso.add(armR);
+  for (const arm of [armL, armR]) {
+    box(arm, 0.45, 1.0, 0.5, dark, 0, -0.45, 0);
+    box(arm, 0.6, 0.5, 0.6, light, 0, -1.1, 0);
+  }
+  const head = new THREE.Group(); head.position.set(0, 1.25, 0.05); torso.add(head);
+  box(head, 0.95, 0.72, 0.85, c, 0, 0.36, 0);
+  box(head, 0.2, 0.1, 0.04, null, -0.22, 0.42, 0.44, { material: eyeMat, cast: false });
+  box(head, 0.2, 0.1, 0.04, null, 0.22, 0.42, 0.44, { material: eyeMat, cast: false });
+  box(head, 0.5, 0.08, 0.04, '#1e1a26', 0, 0.16, 0.44, { cast: false });
+  if (seed % 2) {
+    box(head, 0.14, 0.45, 0.14, '#f2e8d0', -0.38, 0.85, 0).rotation.z = 0.4;
+    box(head, 0.14, 0.45, 0.14, '#f2e8d0', 0.38, 0.85, 0).rotation.z = -0.4;
+  } else {
+    for (let k = -1; k <= 1; k++) box(torso, 0.22, 0.45, 0.22, light, k * 0.45, 1.35, -0.4).rotation.x = -0.3;
+  }
+  g.userData = { torso, armL, armR, head, eyeMat, eyeColor: T.bossEye, tilt: 0, hit: 0 };
+  return g;
+}
+
+function buildZone(project, i, cx, czTop, L) {
+  const T = TERRAINS[i % TERRAINS.length];
+  const color = project.color || '#b38bff';
+  const zw = L.cellW, zd = L.cellD;
+  const zc = czTop + zd / 2;
+  const g = new THREE.Group(); world.add(g);
+  const rand = seeded(hashStr(project.id || project.name || String(i)));
+
+  box(g, zw, 0.3, zd, T.edge, cx, 0.15, zc);
+  box(g, zw - 0.25, 0.04, zd - 0.25, T.ground, cx, 0.31, zc, { cast: false });
+  box(g, zw, 0.06, 0.2, color, cx, 0.32, czTop + zd - 0.1, { cast: false });
+  for (const [bx, bz] of [[cx - zw / 2 + 0.2, czTop + zd - 0.3], [cx + zw / 2 - 0.5, czTop + zd - 0.3]]) banner(g, bx, bz, color);
+  zoneDecor(g, T, cx, czTop, zw, zd, rand);
+
+  const boss = makeBoss(T, hashStr(project.id || project.name || 'b'));
+  boss.position.set(cx, 0.3, czTop + 1.4);
+  g.add(boss);
+
+  const list = project.agents || [];
+  const rows = Math.max(1, Math.ceil(list.length / SEATS_PER_ROW));
+  const pod = { project, terrain: T, boss, hp: 1, defeated: false, target: new THREE.Vector3(cx, 1.8, czTop + 1.6) };
+  for (let r = 0; r < rows; r++) {
+    const seats = list.slice(r * SEATS_PER_ROW, (r + 1) * SEATS_PER_ROW);
+    seats.forEach((a, k) => {
+      const hx = cx + (k - (seats.length - 1) / 2) * 1.5;
+      const hz = czTop + 3.8 + r * 1.7;
+      buildHero(project, a, hx, hz, pod);
+    });
+  }
+
+  const label = document.createElement('div');
+  label.className = 'floor-label zone';
+  label.addEventListener('click', () => focusOn(new THREE.Vector3(cx, 0, zc), null));
+  document.getElementById('labels').appendChild(label);
+  pod.label = label;
+  pod.anchor = new THREE.Vector3(cx, 4.3, czTop + 1.4);
+  pods.push(pod);
+}
+
+function buildHero(project, a, hx, hz, pod) {
+  const seed = hashStr(a.id || a.name || 'x');
+  const shirt = a.color || project.color || '#b38bff';
+  const body = makeCharacter(seed, shirt);
+  body.rotation.order = 'YXZ';
+  const { head, armL, armR } = body.userData.parts;
+
+  const cape = new THREE.Group(); cape.position.set(0, 1.0, -0.17); body.add(cape);
+  box(cape, 0.52, 0.78, 0.05, shade(shirt, -0.2), 0, -0.38, 0);
+  box(head, 0.56, 0.09, 0.54, '#e8c34a', 0, 0.42, 0);
+
+  // Weapon in the right hand: sword, hammer or magic staff
+  const kind = seed % 3;
+  const weapon = new THREE.Group(); weapon.position.set(0, -0.44, 0.04); armR.add(weapon);
+  if (kind === 0) {
+    box(weapon, 0.24, 0.07, 0.1, '#e8c34a', 0, -0.06, 0);
+    box(weapon, 0.08, 0.72, 0.04, '#e9f1f7', 0, -0.46, 0);
+    box(armL, 0.08, 0.42, 0.36, shade(shirt, 0.15), -0.08, -0.32, 0.05);   // shield
+  } else if (kind === 1) {
+    box(weapon, 0.07, 0.62, 0.07, '#7a5236', 0, -0.25, 0);
+    box(weapon, 0.34, 0.24, 0.24, '#9aa3b5', 0, -0.58, 0);
+  } else {
+    box(weapon, 0.06, 0.95, 0.06, '#7a5236', 0, -0.2, 0);
+    box(weapon, 0.18, 0.18, 0.18, null, 0, -0.72, 0, { material: glowMat(shade(shirt, 0.25)), cast: false });
+  }
+
+  // Signal beam (needs you), dizzy stars (down), floating bubble
+  const beamMat = new THREE.MeshBasicMaterial({ color: STATUS.needs_you.css, transparent: true, opacity: 0.35, depthWrite: false });
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.32, 9, 0.32), beamMat);
+  beam.position.y = 5.2; beam.visible = false;
+  body.add(beam);
+  const stars = new THREE.Group(); stars.position.set(0, 1.3, 0.5); stars.visible = false; body.add(stars);
+  for (let k = 0; k < 3; k++) {
+    const an = k / 3 * Math.PI * 2;
+    box(stars, 0.12, 0.12, 0.12, null, Math.cos(an) * 0.32, Math.sin(an) * 0.32, 0, { material: glowMat('#ffe14a'), cast: false });
+  }
+  const bubble = makeBubble();
+  bubble.position.y = 2.0;
+  body.add(bubble);
+  world.add(body);
+
+  const home = new THREE.Vector3(hx, 0.3, hz);
+  const ag = {
+    id: a.id, data: a, project, body, bubble, beam, beamMat, stars, pod,
+    seat: home, home, baseY: 0.3,
+    status: null, path: [], pathIdx: 0, mode: 'home',
+    phase: (seed % 100) / 17, nextBreak: 6 + (seed % 14), lastSwing: 0,
+    pos: home.clone(), facing: Math.PI,
+  };
+  body.traverse(o => { o.userData.agentId = a.id; });
+  const tag = document.createElement('div');
+  tag.addEventListener('click', () => { openCard(a.id); focusOn(home, 1.7); });
+  document.getElementById('labels').appendChild(tag);
+  ag.tag = tag;
+  agents.set(a.id, ag);
+}
+
+function buildCamp(x, z) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); world.add(g);
+  for (let k = 0; k < 7; k++) {
+    const an = k / 7 * Math.PI * 2;
+    box(g, 0.18, 0.14, 0.18, '#8a8090', Math.cos(an) * 0.38, 0.07, Math.sin(an) * 0.38);
+  }
+  box(g, 0.6, 0.12, 0.14, '#6b4630', 0, 0.1, 0).rotation.y = 0.6;
+  box(g, 0.6, 0.12, 0.14, '#6b4630', 0, 0.1, 0).rotation.y = -0.6;
+  fireFlames = [
+    box(g, 0.3, 0.45, 0.3, null, 0, 0.35, 0, { material: glowMat('#ff7a1a'), cast: false }),
+    box(g, 0.18, 0.35, 0.18, null, 0.06, 0.55, 0.04, { material: glowMat('#ffd23a'), cast: false }),
+    box(g, 0.14, 0.25, 0.14, null, -0.08, 0.45, -0.06, { material: glowMat('#ffb02a'), cast: false }),
+  ];
+  // logs to sit on
+  for (const [lx, lz, ry] of [[-1.0, 0, Math.PI / 2], [1.0, 0, Math.PI / 2], [0, -1.0, 0], [0, 1.0, 0]]) {
+    box(g, 1.0, 0.22, 0.26, '#7a5236', lx, 0.11, lz).rotation.y = ry;
+  }
+  // tents
+  for (const [tx, tz, c] of [[-1.6, -1.4, '#d8c49a'], [1.5, -1.6, '#b85a48']]) {
+    const tent = new THREE.Mesh(new THREE.ConeGeometry(0.85, 1.2, 4), mat(c));
+    tent.position.set(tx, 0.6, tz); tent.rotation.y = Math.PI / 4; tent.castShadow = true;
+    g.add(tent);
+    box(g, 0.3, 0.5, 0.05, '#3a2c2c', tx, 0.25, tz + 0.6, { cast: false });
+  }
+  campSpot.set(x, 0, z);
+}
+
+function buildCommand(o, x, z) {
+  const g = new THREE.Group(); world.add(g);
+  const tent = new THREE.Mesh(new THREE.ConeGeometry(1.3, 1.8, 4), mat('#c8433f'));
+  tent.position.set(x - 0.4, 0.9, z - 1.5); tent.rotation.y = Math.PI / 4; tent.castShadow = true;
+  g.add(tent);
+  box(g, 0.08, 2.8, 0.08, '#5a4636', x - 0.4, 1.4, z - 1.5);
+  box(g, 0.7, 0.45, 0.04, '#ffd23a', x - 0.02, 2.55, z - 1.5, { cast: false });
+  // war table with a glowing map
+  box(g, 1.7, 0.1, 1.0, '#7a5236', x, 0.75, z);
+  for (const [lx, lz] of [[-0.75, -0.4], [0.75, -0.4], [-0.75, 0.4], [0.75, 0.4]]) box(g, 0.1, 0.72, 0.1, '#5a3a24', x + lx, 0.36, z + lz);
+  const screenMat = new THREE.MeshBasicMaterial({ color: '#3ddc84' });
+  box(g, 1.5, 0.02, 0.8, null, x, 0.81, z, { material: screenMat, cast: false });
+  // the beacon
+  box(g, 0.12, 1.6, 0.12, '#4a4058', x + 1.3, 0.8, z);
+  const lampMat = new THREE.MeshBasicMaterial({ color: '#ff4d4d' });
+  const lamp = box(g, 0.34, 0.34, 0.34, null, x + 1.3, 1.75, z, { material: lampMat, cast: false });
+
+  const body = makeCharacter(7, '#ff6fa0');
+  const cape = new THREE.Group(); cape.position.set(0, 1.0, -0.17); body.add(cape);
+  box(cape, 0.56, 0.85, 0.05, '#c8433f', 0, -0.4, 0);
+  box(body.userData.parts.head, 0.56, 0.09, 0.54, '#ffd23a', 0, 0.42, 0);
+  body.position.set(x, 0, z - 0.75);
+  body.rotation.y = Math.PI / 5;
+  body.userData.parts.armR.rotation.x = -0.9;
+  body.traverse(c => { c.userData.owner = true; });
+  world.add(body);
+
+  const label = document.createElement('div');
+  label.className = 'floor-label owner';
+  label.addEventListener('click', () => document.getElementById('inbox').classList.remove('collapsed'));
+  document.getElementById('labels').appendChild(label);
+  owner = { name: o.name || 'You', body, screenMat, lamp, lampMat, label, anchor: new THREE.Vector3(x, 0.1, z + 1.0) };
+}
+
+function setHeroStatus(ag, s) {
+  if (ag.status === s) return;
+  ag.status = s;
+  ag.beam.visible = s === 'needs_you';
+  ag.stars.visible = s === 'error';
+  const { bang, gem } = ag.bubble.userData;
+  ag.bubble.visible = s === 'needs_you' || s === 'done';
+  bang.visible = s === 'needs_you';
+  gem.visible = s === 'done';
+  if (s !== 'idle' && ag.mode !== 'home') walkTo(ag, [ag.home.clone()]);
+}
+
+function spawnBolt(ag) {
+  const from = ag.body.position.clone().add(new THREE.Vector3(0, 1.0, -0.4));
+  const to = ag.pod.target.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, Math.random() * 0.6, 0));
+  const c = shade(ag.data.color || ag.project.color || '#ffffff', 0.2);
+  const m = new THREE.Mesh(boxGeo(0.2, 0.2, 0.2), glowMat(c));
+  world.add(m);
+  projectiles.push({ m, from, to, k: 0, pod: ag.pod });
+}
+
+function animateHero(ag, dt) {
+  const { legL, legR, armL, armR, head } = ag.body.userData.parts;
+  const ph = t + ag.phase;
+  legL.rotation.set(0, 0, 0); legR.rotation.set(0, 0, 0);
+  armL.rotation.set(0, 0, 0); armR.rotation.set(0, 0, 0);
+  head.rotation.set(0, 0, 0);
+  let y = 0, pitch = 0;
+
+  if (ag.mode === 'walking') {
+    const target = ag.path[ag.pathIdx];
+    const delta = target.clone().sub(ag.pos);
+    const dist = delta.length(), step = WALK_SPEED * 1.2 * dt;
+    if (dist <= step) {
+      ag.pos.copy(target);
+      if (++ag.pathIdx >= ag.path.length) {
+        ag.mode = ag.pos.distanceTo(ag.home) < 0.05 ? 'home' : 'resting';
+        ag.restUntil = t + 5 + Math.random() * 6;
+      }
+    } else {
+      ag.pos.add(delta.multiplyScalar(step / dist));
+      ag.facing = Math.atan2(delta.x, delta.z);
+    }
+    const sw = Math.sin(t * 12) * 0.7;
+    legL.rotation.x = sw; legR.rotation.x = -sw; armL.rotation.x = -sw; armR.rotation.x = sw;
+    y = Math.abs(Math.sin(t * 12)) * 0.05;
+  } else if (ag.mode === 'resting') {
+    // sitting on a log by the fire
+    ag.facing = Math.atan2(campSpot.x - ag.pos.x, campSpot.z - ag.pos.z);
+    legL.rotation.x = legR.rotation.x = -Math.PI / 2;
+    y = -0.22;
+    armL.rotation.x = armR.rotation.x = -1.0 + Math.sin(ph * 1.5) * 0.05;
+    head.rotation.x = Math.sin(ph * 0.7) * 0.08;
+    if (t > ag.restUntil && ag.status === 'idle') walkTo(ag, [ag.home.clone()]);
+  } else {
+    ag.pos.copy(ag.home);
+    const s = ag.status;
+    if (s === 'working') {
+      ag.facing = Math.PI;
+      const c = (ph * 1.3) % 1;
+      armR.rotation.x = c < 0.7 ? -0.4 - 2.6 * (c / 0.7) : -3.0 + 2.6 * ((c - 0.7) / 0.3);
+      armL.rotation.x = -0.7;
+      legL.rotation.x = 0.35; legR.rotation.x = -0.35;
+      if (c > 0.7) ag.pos.z -= Math.sin((c - 0.7) / 0.3 * Math.PI) * 0.3;
+      if (c > 0.85 && ag.lastSwing <= 0.85) spawnBolt(ag);
+      ag.lastSwing = c;
+    } else if (s === 'needs_you') {
+      ag.facing = Math.PI / 4;
+      y = Math.max(0, Math.sin(ph * 6)) * 0.35;
+      armR.rotation.z = 2.7 + Math.sin(ph * 10) * 0.3;
+      ag.beamMat.opacity = 0.25 + 0.2 * (0.5 + 0.5 * Math.sin(t * 6));
+    } else if (s === 'error') {
+      // knocked down, flat on their back
+      ag.facing = Math.PI / 4;
+      pitch = -Math.PI / 2;
+      y = 0.17;
+      armL.rotation.z = -1.2; armR.rotation.z = 1.2;
+      ag.stars.rotation.z = t * 4;
+    } else if (s === 'done') {
+      ag.facing = Math.PI / 4;
+      armL.rotation.z = -2.6 - Math.sin(ph * 4) * 0.15;
+      armR.rotation.z = 2.6 + Math.sin(ph * 4) * 0.15;
+      y = Math.max(0, Math.sin(ph * 3)) * 0.12;
+    } else {
+      // idle: catch breath, then head to camp now and then
+      ag.facing = Math.PI;
+      armL.rotation.x = armR.rotation.x = -0.15;
+      head.rotation.x = 0.15 + Math.sin(ph) * 0.05;
+      ag.nextBreak -= dt;
+      if (ag.nextBreak <= 0) {
+        ag.nextBreak = 14 + Math.random() * 16;
+        const an = Math.random() * Math.PI * 2;
+        walkTo(ag, [campSpot.clone().add(new THREE.Vector3(Math.cos(an) * 1.0, 0.22, Math.sin(an) * 1.0))]);
+      }
+    }
+  }
+
+  ag.body.position.set(ag.pos.x, ag.pos.y + y, ag.pos.z);
+  ag.body.rotation.set(pitch, ag.facing, 0);
+  if (ag.bubble.visible) {
+    const { bang, gem } = ag.bubble.userData;
+    ag.bubble.position.y = 1.95 + Math.sin(t * 4 + ag.phase) * 0.08;
+    bang.scale.setScalar(1 + Math.max(0, Math.sin(t * 6)) * 0.15);
+    gem.rotation.y = t * 2;
+  }
+}
+
+function battleTick(dt) {
+  // magic bolts flying at the bosses
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    p.k += dt / 0.45;
+    if (p.k >= 1) {
+      world.remove(p.m);
+      projectiles.splice(i, 1);
+      p.pod.boss.userData.hit = 0.18;
+      continue;
+    }
+    p.m.position.lerpVectors(p.from, p.to, p.k);
+    p.m.position.y += Math.sin(p.k * Math.PI) * 0.7;
+    p.m.rotation.set(t * 8, t * 6, 0);
+  }
+
+  // bosses: sway, flinch when hit, fall over when defeated
+  for (const pod of pods) {
+    const b = pod.boss.userData;
+    const ph = t + pod.boss.position.x;
+    const goal = pod.defeated ? -1.45 : 0;
+    b.tilt += (goal - b.tilt) * Math.min(1, dt * 3);
+    pod.boss.rotation.x = b.tilt;
+    if (pod.defeated) {
+      b.eyeMat.color.set('#3a3346');
+      b.armL.rotation.set(0, 0, -0.3); b.armR.rotation.set(0, 0, 0.3);
+      continue;
+    }
+    b.eyeMat.color.set(b.hit > 0 ? '#ffffff' : b.eyeColor);
+    b.hit = Math.max(0, b.hit - dt);
+    const flinch = b.hit > 0 ? 0.12 : 0;
+    b.torso.rotation.x = -flinch + Math.sin(ph * 1.2) * 0.04;
+    b.torso.rotation.z = Math.sin(ph * 0.8) * 0.05;
+    const slam = Math.max(0, Math.sin(ph * 1.1));
+    b.armL.rotation.x = -slam * 1.4;
+    b.armR.rotation.x = -Math.max(0, Math.sin(ph * 1.1 + Math.PI)) * 1.4;
+    b.head.rotation.y = Math.sin(ph * 0.6) * 0.3;
+    pod.boss.scale.setScalar(1 + flinch * 0.3);
+  }
+
+  // campfire flicker
+  fireFlames.forEach((f, i) => {
+    const s = 0.8 + 0.3 * Math.abs(Math.sin(t * (9 + i * 3) + i));
+    f.scale.set(1, s, 1);
+  });
+  // smoke drifting up
+  for (const s of smoke) {
+    s.t = (s.t + dt * 0.08) % 1;
+    s.m.position.set(s.base.x + Math.sin(s.t * 6) * 0.4 + s.t * 1.5, s.base.y + s.t * 6, s.base.z);
+    s.m.scale.setScalar(0.6 + s.t * 1.8);
+  }
+}
+
 /* ------------------------------------------------------------------ *
  *  Applying data
  * ------------------------------------------------------------------ */
@@ -473,7 +1021,7 @@ const handledKey = a => `${a.id}@${a.updated || ''}`;
 function applyData(d) {
   data = d;
   const key = JSON.stringify((d.projects || []).map(p => [p.id, p.color, (p.agents || []).map(a => a.id)]));
-  if (key !== layoutKey) { layoutKey = key; buildWorld(d); }
+  if (key !== layoutKey) { layoutKey = key; (BATTLE ? buildBattle : buildWorld)(d); }
 
   for (const p of d.projects || []) {
     for (const a of p.agents || []) {
@@ -484,8 +1032,7 @@ function applyData(d) {
       updateTag(ag);
     }
   }
-  document.getElementById('title').textContent = `${(d.owner && d.owner.name) || 'My'}'s ${COZY ? 'Agent' : 'Pixel'} Office`;
-  document.title = 'Pixel Office';
+  document.getElementById('title').textContent = `${(d.owner && d.owner.name) || 'My'}'s ${APP_NAME}`;
   renderHud();
   notifyNew();
   if (openCardId) openCard(openCardId);
@@ -496,12 +1043,13 @@ function updateTag(ag) {
   const alert = ALERT_STATUSES.has(s);
   ag.tag.className = `agent-tag s-${s}${alert ? ' ask' : ''}`;
   ag.tag.innerHTML = alert
-    ? `<div class="ask-who">${esc(a.name)} ${s === 'error' ? 'is stuck' : 'needs you'}</div>
+    ? `<div class="ask-who">${esc(a.name)} ${BATTLE ? (s === 'error' ? 'is down!' : 'needs backup!') : (s === 'error' ? 'is stuck' : 'needs you')}</div>
        <div class="ask-what">${esc((a.action && a.action.title) || a.task || 'Take a look')}</div>`
     : `<i class="dot" style="background:${STATUS[s].css}"></i><b>${esc(a.name)}</b><span class="tag-status">${STATUS[s].label}</span>`;
 }
 
 function setAgentStatus(ag, s) {
+  if (BATTLE) return setHeroStatus(ag, s);
   if (ag.status === s) return;
   ag.status = s;
   const c = STATUS[s].css;
@@ -648,7 +1196,7 @@ function placeAgentTags() {
     if (!ag.tag) return;
     const alert = ALERT_STATUSES.has(ag.status);
     if (!alert && !showNames) { ag.tag.style.display = 'none'; return; }
-    tagPos.set(ag.body.position.x, alert ? 2.5 : 1.75, ag.body.position.z);
+    tagPos.set(ag.body.position.x, (ag.baseY || 0) + (alert ? 2.5 : 1.75), ag.body.position.z);
     if (!alert) { placeLabel(tagPos, ag.tag); return; }
     tmp.copy(tagPos).project(camera);
     bubbles.push({ ag, x: (tmp.x + 1) / 2 * window.innerWidth, y: (1 - tmp.y) / 2 * window.innerHeight, vis: tmp.z > -1 && tmp.z < 1 });
@@ -678,7 +1226,8 @@ function loop() {
   t += dt;
 
   if (demoOn) demoTick(dt);
-  agents.forEach(ag => animateAgent(ag, dt));
+  agents.forEach(ag => (BATTLE ? animateHero : animateAgent)(ag, dt));
+  if (BATTLE) battleTick(dt);
 
   if (owner) {
     const n = inboxItems().length;
@@ -746,7 +1295,7 @@ function renderHud() {
   badge.textContent = items.length;
   badge.classList.toggle('zero', !items.length);
   const ul = document.getElementById('inbox-list');
-  ul.innerHTML = items.length ? '' : '<li class="empty">All clear. Nobody needs you right now ☕</li>';
+  ul.innerHTML = items.length ? '' : `<li class="empty">${BATTLE ? 'All quiet on the battlefield ⚔️' : 'All clear. Nobody needs you right now ☕'}</li>`;
   for (const { a, p } of items) {
     const li = document.createElement('li');
     const s = effectiveStatus(a);
@@ -756,11 +1305,21 @@ function renderHud() {
     ul.appendChild(li);
   }
 
-  document.title = items.length ? `(${items.length}) Pixel Office` : 'Pixel Office';
+  document.title = items.length ? `(${items.length}) ${APP_NAME}` : APP_NAME;
 
   for (const pd of pods) {
     const n = (pd.project.agents || []).filter(a => ALERT_STATUSES.has(effectiveStatus(a))).length;
-    pd.label.innerHTML = `${esc(pd.project.name)}${n ? `<span class="alert">!${n}</span>` : ''}`;
+    if (BATTLE) {
+      const list = pd.project.agents || [];
+      const prog = list.length ? list.reduce((sum, a) => sum + (effectiveStatus(a) === 'done' ? 1 : Math.max(0, Math.min(1, +a.progress || 0))), 0) / list.length : 0;
+      pd.hp = 1 - prog;
+      pd.defeated = list.length > 0 && list.every(a => effectiveStatus(a) === 'done');
+      pd.label.innerHTML = `<div class="zone-name">${esc(pd.project.name)}${n ? `<span class="alert">!${n}</span>` : ''}</div>
+        <div class="zone-sub">${pd.defeated ? '🏆 Boss defeated!' : `${esc(pd.terrain.name)} boss · ${Math.round(pd.hp * 100)}% HP`}</div>
+        <div class="hp"><span style="width:${(pd.hp * 100).toFixed(0)}%"></span></div>`;
+    } else {
+      pd.label.innerHTML = `${esc(pd.project.name)}${n ? `<span class="alert">!${n}</span>` : ''}`;
+    }
     if (!COZY) pd.label.style.borderColor = '#0e0d1a';
     pd.label.style.background = pd.project.color || '';
     pd.label.style.color = '#1b1a2e';
@@ -955,6 +1514,13 @@ styleBtn.textContent = COZY ? '👾 Pixel look' : '🧸 Cozy look';
 styleBtn.addEventListener('click', () => {
   store.set('style', COZY ? 'pixel' : 'cozy');
   const u = new URL(location.href); u.searchParams.delete('style'); location.href = u.toString();
+});
+
+const themeBtn = document.getElementById('btn-theme');
+themeBtn.textContent = BATTLE ? '🏢 Office' : '⚔️ Battle';
+themeBtn.addEventListener('click', () => {
+  store.set('theme', BATTLE ? 'office' : 'battle');
+  const u = new URL(location.href); u.searchParams.delete('theme'); location.href = u.toString();
 });
 
 const legend = document.getElementById('legend');
