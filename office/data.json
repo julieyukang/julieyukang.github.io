@@ -1,0 +1,142 @@
+{
+  "owner": { "name": "Julie" },
+  "projects": [
+    {
+      "id": "phonics",
+      "name": "Phonics Cards",
+      "color": "#ff8fb1",
+      "description": "Printable phonics flashcard sets for TPT.",
+      "agents": [
+        {
+          "id": "phonics-planner",
+          "name": "Planner",
+          "role": "Set planning",
+          "status": "done",
+          "task": "Planned the CVC words set (48 cards)",
+          "progress": 1,
+          "updated": "2026-11-20T18:10:00Z"
+        },
+        {
+          "id": "phonics-designer",
+          "name": "Designer",
+          "role": "Card design",
+          "status": "needs_you",
+          "task": "Rendering 4-up pages in Boho Rainbow style",
+          "progress": 0.7,
+          "updated": "2026-11-20T19:40:00Z",
+          "action": {
+            "title": "Pick a cover style",
+            "detail": "Two cover options are ready. Choose one so I can finish the remaining 12 pages.",
+            "link": ""
+          }
+        },
+        {
+          "id": "phonics-qa",
+          "name": "Proofer",
+          "role": "Spelling & print QA",
+          "status": "idle",
+          "task": "Waiting for designs",
+          "progress": 0,
+          "updated": "2026-11-20T17:00:00Z"
+        }
+      ]
+    },
+    {
+      "id": "website",
+      "name": "Personal Site",
+      "color": "#7cc6ff",
+      "description": "julieyukang.github.io",
+      "agents": [
+        {
+          "id": "site-builder",
+          "name": "Builder",
+          "role": "Front-end",
+          "status": "working",
+          "task": "Building the pixel office page",
+          "progress": 0.55,
+          "updated": "2026-11-20T20:00:00Z"
+        },
+        {
+          "id": "site-reviewer",
+          "name": "Reviewer",
+          "role": "Code review",
+          "status": "working",
+          "task": "Reviewing unit 4 styles",
+          "progress": 0.3,
+          "updated": "2026-11-20T19:55:00Z"
+        }
+      ]
+    },
+    {
+      "id": "marketing",
+      "name": "Launch Marketing",
+      "color": "#ffd166",
+      "description": "Campaign for the holiday product drop.",
+      "agents": [
+        {
+          "id": "mkt-writer",
+          "name": "Copywriter",
+          "role": "Email sequence",
+          "status": "working",
+          "task": "Drafting email 3 of 5",
+          "progress": 0.6,
+          "updated": "2026-11-20T19:50:00Z"
+        },
+        {
+          "id": "mkt-seo",
+          "name": "SEO Scout",
+          "role": "Keyword research",
+          "status": "error",
+          "task": "Keyword pull failed",
+          "progress": 0.2,
+          "updated": "2026-11-20T19:20:00Z",
+          "action": {
+            "title": "Reconnect the analytics tool",
+            "detail": "The connector was refused by the network. Reconnect it, then I'll retry.",
+            "link": ""
+          }
+        },
+        {
+          "id": "mkt-social",
+          "name": "Social",
+          "role": "Social posts",
+          "status": "needs_you",
+          "task": "10 posts drafted",
+          "progress": 0.9,
+          "updated": "2026-11-20T19:30:00Z",
+          "action": {
+            "title": "Approve post schedule",
+            "detail": "Posts are queued for Mon/Wed/Fri at 9am. Approve or change the times.",
+            "link": ""
+          }
+        },
+        {
+          "id": "mkt-report",
+          "name": "Analyst",
+          "role": "Performance report",
+          "status": "idle",
+          "task": "Next report due Monday",
+          "progress": 0,
+          "updated": "2026-11-20T15:00:00Z"
+        }
+      ]
+    },
+    {
+      "id": "research",
+      "name": "Market Research",
+      "color": "#9be38b",
+      "description": "Product–market fit for new digital downloads.",
+      "agents": [
+        {
+          "id": "res-deep",
+          "name": "Researcher",
+          "role": "Deep research",
+          "status": "working",
+          "task": "Comparing 14 competitor shops",
+          "progress": 0.4,
+          "updated": "2026-11-20T19:58:00Z"
+        }
+      ]
+    }
+  ]
+}

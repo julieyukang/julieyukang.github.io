@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pixel Office</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+  <div id="labels"></div>
+  <div id="tooltip" hidden></div>
+
+  <header id="hud">
+    <h1 id="title">Pixel Office</h1>
+    <div id="stats"></div>
+  </header>
+
+  <aside id="inbox" class="panel">
+    <div class="panel-head">
+      <h2>Needs you <span id="inbox-count" class="badge">0</span></h2>
+      <button id="inbox-toggle" class="icon-btn" aria-label="Collapse inbox">–</button>
+    </div>
+    <ul id="inbox-list"></ul>
+  </aside>
+
+  <aside id="card" class="panel" hidden>
+    <div class="panel-head">
+      <h2 id="card-name"></h2>
+      <button id="card-close" class="icon-btn" aria-label="Close">×</button>
+    </div>
+    <div id="card-body"></div>
+  </aside>
+
+  <footer id="controls">
+    <div class="legend" id="legend"></div>
+    <div class="buttons">
+      <button id="btn-notify" class="pix-btn">🔔 Alerts</button>
+      <button id="btn-sound" class="pix-btn">🔊 Sound</button>
+      <button id="btn-demo" class="pix-btn">▶ Demo</button>
+      <button id="btn-reset" class="pix-btn">⟲ View</button>
+    </div>
+  </footer>
+
+  <div id="toast" hidden></div>
+
+  <script type="module" src="office.js"></script>
+</body>
+</html>
